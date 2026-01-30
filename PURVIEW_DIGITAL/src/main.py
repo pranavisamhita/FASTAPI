@@ -80,3 +80,4 @@ def delete_data(item_id: int, admin: str = Depends(get_current_admin)):
             admin_data_db.remove(item)
             return {"message": "Deleted successfully"}
     raise HTTPException(status_code=404, detail="Item not found")
+
