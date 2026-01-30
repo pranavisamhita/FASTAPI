@@ -1,71 +1,82 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from typing import Annotated
+from pydantic import BaseModel
+from typing import List, Annotated
 
 app = FastAPI(
     title="Purview API",
-    description="Backend API for Purview Digital",
+    description="Admin-based API for Purview Digital",
     version="1.0.0"
 )
 
-
-# ---------- DATABASE (SQLite) ----------
-DATABASE_URL = "sqlite:///./test.db"
-
-engine = create_engine(
-    DATABASE_URL, connect_args={"check_same_thread": False}
-)
-
-SessionLocal = sessionmaker(bind=engine)
-
-# ---------- AUTH ----------
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-# fake user (for testing)
-fake_user = {
-    "username": "admin",
-    "password": "admin123"
-}
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "admin123"
+FAKE_TOKEN = "admin-token"
 
 def authenticate_user(username: str, password: str):
-    if username == fake_user["username"] and password == fake_user["password"]:
-        return True
-    return False
+    return username == ADMIN_USERNAME and password == ADMIN_PASSWORD
 
-def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
-    if token != "admin":
+def get_current_admin(token: Annotated[str, Depends(oauth2_scheme)]):
+    if token != FAKE_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
+            detail="Invalid or missing token"
         )
-    return token
+    return ADMIN_USERNAME
 
-# ---------- ROUTES ----------
 @app.post("/token")
 def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
-    is_valid = authenticate_user(form_data.username, form_data.password)
-    if not is_valid:
+    if not authenticate_user(form_data.username, form_data.password):
         raise HTTPException(status_code=400, detail="Wrong username or password")
 
     return {
-        "access_token": "admin",
+        "access_token": FAKE_TOKEN,
         "token_type": "bearer"
     }
 
+
+class AdminData(BaseModel):
+    title: str
+    description: str
+
+class AdminDataOut(AdminData):
+    id: int
+
+admin_data_db: List[AdminDataOut] = []
+
 @app.get("/")
 def root():
-    return {"message": "API is working"}
+    return {"message": "Purview API is running"}
 
-@app.get("/protected")
-def protected_route(current_user: str = Depends(get_current_user)):
-    return {"message": "You are authenticated"}
+@app.get("/admin-data", response_model=List[AdminDataOut])
+def get_all_data(admin: str = Depends(get_current_admin)):
+    return admin_data_db
 
+@app.post("/admin-data", response_model=AdminDataOut)
+def create_data(data: AdminData, admin: str = Depends(get_current_admin)):
+    new_item = AdminDataOut(
+        id=len(admin_data_db) + 1,
+        title=data.title,
+        description=data.description
+    )
+    admin_data_db.append(new_item)
+    return new_item
 
-@app.get("/purview")
-def purview_home(current_user: str = Depends(get_current_user)):
-    return {
-        "app": "Purview API",
-        "status": "Authenticated access granted"
-    }
+@app.put("/admin-data/{item_id}", response_model=AdminDataOut)
+def update_data(item_id: int, data: AdminData, admin: str = Depends(get_current_admin)):
+    for item in admin_data_db:
+        if item.id == item_id:
+            item.title = data.title
+            item.description = data.description
+            return item
+    raise HTTPException(status_code=404, detail="Item not found")
+
+@app.delete("/admin-data/{item_id}")
+def delete_data(item_id: int, admin: str = Depends(get_current_admin)):
+    for item in admin_data_db:
+        if item.id == item_id:
+            admin_data_db.remove(item)
+            return {"message": "Deleted successfully"}
+    raise HTTPException(status_code=404, detail="Item not found")
